@@ -1,0 +1,954 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Dino Runner</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #1a1a2e; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; font-family: 'Courier New', monospace; color: #fff; }
+  h1 { font-size: 2.5rem; margin-bottom: 10px; color: #e94560; text-shadow: 0 0 20px #e9456088; }
+  #game-wrapper { position: relative; }
+  #canvas { border: 3px solid #e94560; border-radius: 8px; display: block; background: #16213e; box-shadow: 0 0 30px #e9456044; }
+  #ui { display: flex; justify-content: space-between; align-items: center; width: 800px; padding: 8px 4px; }
+  #score-display { font-size: 1.1rem; color: #0f3460; background: #e94560; padding: 4px 12px; border-radius: 4px; }
+  #ammo-display { font-size: 1rem; color: #fff; }
+  #ammo-bar { display: flex; gap: 4px; align-items: center; }
+  .ammo-bullet { width: 10px; height: 18px; background: #f5a623; border-radius: 2px; transition: background 0.2s; }
+  .ammo-bullet.empty { background: #333; }
+  #powerup-display { font-size: 0.9rem; color: #4ecca3; min-width: 140px; text-align: right; }
+  #selection-screen { position: absolute; top: 0; left: 0; width: 800px; height: 300px; background: #16213eee; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; border-radius: 6px; z-index: 10; }
+  #selection-screen h2 { font-size: 1.8rem; color: #4ecca3; }
+  #dino-options { display: flex; gap: 20px; }
+  .dino-option { cursor: pointer; padding: 12px 20px; border: 3px solid #444; border-radius: 10px; text-align: center; transition: all 0.2s; background: #0f3460; }
+  .dino-option:hover, .dino-option.selected { border-color: #e94560; background: #1a1a4e; transform: scale(1.05); }
+  .dino-option canvas { display: block; margin: 0 auto 8px; }
+  .dino-option span { font-size: 0.8rem; color: #aaa; }
+  #start-btn { padding: 10px 30px; background: #e94560; color: #fff; border: none; border-radius: 6px; font-size: 1.1rem; cursor: pointer; font-family: inherit; transition: background 0.2s; }
+  #start-btn:hover { background: #c73652; }
+  #game-over-screen { display: none; position: absolute; top: 0; left: 0; width: 800px; height: 300px; background: #16213ecc; flex-direction: column; align-items: center; justify-content: center; gap: 16px; border-radius: 6px; z-index: 10; }
+  #game-over-screen h2 { font-size: 2rem; color: #e94560; }
+  #final-score { font-size: 1.2rem; color: #fff; }
+  #restart-btn { padding: 10px 30px; background: #4ecca3; color: #16213e; border: none; border-radius: 6px; font-size: 1.1rem; cursor: pointer; font-family: inherit; font-weight: bold; transition: background 0.2s; }
+  #restart-btn:hover { background: #3ab891; }
+  #controls { margin-top: 10px; font-size: 0.8rem; color: #555; text-align: center; }
+</style>
+</head>
+<body>
+<h1>DINO RUNNER</h1>
+<div id="ui">
+  <div id="score-display">SCORE: <span id="score">0</span></div>
+  <div id="ammo-display"><span style="color:#f5a623">AMMO: </span><span id="ammo-bar" style="display:inline-flex;gap:3px;vertical-align:middle"></span></div>
+  <div id="powerup-display" id="powerup-display"></div>
+</div>
+<div id="game-wrapper">
+  <canvas id="canvas" width="800" height="300"></canvas>
+  <div id="selection-screen">
+    <h2>CHOOSE YOUR DINO</h2>
+    <div id="dino-options"></div>
+    <button id="start-btn">START GAME</button>
+  </div>
+  <div id="game-over-screen">
+    <h2>GAME OVER</h2>
+    <div id="final-score"></div>
+    <button id="restart-btn">PLAY AGAIN</button>
+  </div>
+</div>
+<div id="controls">SPACE / UP = Jump &nbsp;|&nbsp; DOWN = Duck &nbsp;|&nbsp; Z / F = Shoot &nbsp;|&nbsp; Double Jump allowed</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+const GROUND = H - 50;
+
+// ── Dino definitions ──────────────────────────────────────────────────────────
+const DINOS = [
+  {
+    name: 'Rex', color: '#4ecca3', eyeColor: '#16213e', accentColor: '#38b296',
+    desc: 'Balanced',
+    draw(ctx, x, y, frame, ducking, invincible, shooting) {
+      const c = invincible ? '#ffe066' : this.color;
+      const a = invincible ? '#ffc200' : this.accentColor;
+      if (ducking) {
+        // Duck body
+        ctx.fillStyle = c;
+        ctx.fillRect(x - 10, y - 18, 50, 18);
+        ctx.fillStyle = a;
+        ctx.fillRect(x - 10, y - 18, 50, 5);
+        // Eye
+        ctx.fillStyle = this.eyeColor;
+        ctx.fillRect(x + 28, y - 15, 5, 5);
+        // Legs
+        const legOff = frame % 2 === 0 ? 0 : 3;
+        ctx.fillStyle = c;
+        ctx.fillRect(x + 5, y - 5 + legOff, 8, 8);
+        ctx.fillRect(x + 20, y - 5 - legOff, 8, 8);
+      } else {
+        // Body
+        ctx.fillStyle = c;
+        ctx.fillRect(x, y - 40, 30, 28);
+        // Head
+        ctx.fillStyle = c;
+        ctx.fillRect(x + 10, y - 60, 28, 24);
+        // Accent stripe
+        ctx.fillStyle = a;
+        ctx.fillRect(x + 10, y - 60, 28, 6);
+        // Eye
+        ctx.fillStyle = this.eyeColor;
+        ctx.fillRect(x + 28, y - 52, 6, 6);
+        // Mouth line
+        ctx.fillStyle = a;
+        ctx.fillRect(x + 34, y - 42, 4, 2);
+        // Tail
+        ctx.fillStyle = c;
+        ctx.fillRect(x - 14, y - 30, 16, 10);
+        ctx.fillRect(x - 20, y - 22, 10, 6);
+        // Legs
+        const legOff = frame % 2 === 0 ? 0 : 5;
+        ctx.fillStyle = c;
+        ctx.fillRect(x + 5, y - 14 + legOff, 8, 18 - legOff);
+        ctx.fillRect(x + 18, y - 14 - legOff + 5, 8, 18 - legOff);
+        // Arm
+        ctx.fillStyle = a;
+        ctx.fillRect(x + 20, y - 32, 8, 5);
+        if (shooting) {
+          ctx.fillStyle = '#ffe066';
+          ctx.fillRect(x + 38, y - 46, 12, 4);
+        }
+      }
+    }
+  },
+  {
+    name: 'Spike', color: '#e94560', eyeColor: '#fff', accentColor: '#c73652',
+    desc: 'Fast & Fiery',
+    draw(ctx, x, y, frame, ducking, invincible, shooting) {
+      const c = invincible ? '#ffe066' : this.color;
+      const a = invincible ? '#ffc200' : this.accentColor;
+      if (ducking) {
+        ctx.fillStyle = c;
+        ctx.fillRect(x - 10, y - 18, 50, 18);
+        ctx.fillStyle = this.eyeColor;
+        ctx.fillRect(x + 28, y - 15, 5, 5);
+        const legOff = frame % 2 === 0 ? 0 : 3;
+        ctx.fillStyle = c;
+        ctx.fillRect(x + 5, y - 5 + legOff, 8, 8);
+        ctx.fillRect(x + 20, y - 5 - legOff, 8, 8);
+        // Spikes on back
+        ctx.fillStyle = a;
+        for(let i=0;i<4;i++) ctx.fillRect(x+2+i*12, y-26, 5, 8);
+      } else {
+        ctx.fillStyle = c;
+        ctx.fillRect(x, y - 40, 28, 26);
+        ctx.fillRect(x + 8, y - 60, 26, 22);
+        // Spikes
+        ctx.fillStyle = a;
+        for(let i=0;i<4;i++) ctx.fillRect(x+1+i*7, y-50, 4, 12);
+        ctx.fillStyle = this.eyeColor;
+        ctx.fillRect(x + 24, y - 53, 5, 5);
+        ctx.fillStyle = a;
+        ctx.fillRect(x + 30, y - 44, 4, 2);
+        ctx.fillStyle = c;
+        ctx.fillRect(x - 14, y - 30, 16, 10);
+        ctx.fillRect(x - 22, y - 22, 12, 7);
+        const legOff = frame % 2 === 0 ? 0 : 5;
+        ctx.fillRect(x + 4, y - 14 + legOff, 8, 18 - legOff);
+        ctx.fillRect(x + 17, y - 14 - legOff + 5, 8, 18 - legOff);
+        if (shooting) {
+          ctx.fillStyle = '#ff6b00';
+          ctx.fillRect(x + 34, y - 46, 14, 4);
+        }
+      }
+    }
+  },
+  {
+    name: 'Blaze', color: '#9b59b6', eyeColor: '#ffe066', accentColor: '#7d3c98',
+    desc: 'Mystic Power',
+    draw(ctx, x, y, frame, ducking, invincible, shooting) {
+      const c = invincible ? '#ffe066' : this.color;
+      const a = invincible ? '#ffc200' : this.accentColor;
+      if (ducking) {
+        ctx.fillStyle = c;
+        ctx.fillRect(x - 10, y - 18, 50, 18);
+        ctx.fillStyle = this.eyeColor;
+        ctx.fillRect(x + 28, y - 15, 5, 5);
+        const legOff = frame % 2 === 0 ? 0 : 3;
+        ctx.fillStyle = c;
+        ctx.fillRect(x + 5, y - 5 + legOff, 8, 8);
+        ctx.fillRect(x + 20, y - 5 - legOff, 8, 8);
+      } else {
+        ctx.fillStyle = c;
+        ctx.fillRect(x, y - 40, 28, 26);
+        ctx.fillRect(x + 8, y - 62, 26, 24);
+        // Crest
+        ctx.fillStyle = a;
+        ctx.fillRect(x + 12, y - 70, 6, 10);
+        ctx.fillRect(x + 20, y - 68, 6, 8);
+        ctx.fillStyle = this.eyeColor;
+        ctx.fillRect(x + 24, y - 55, 6, 6);
+        ctx.fillStyle = a;
+        ctx.fillRect(x + 30, y - 44, 4, 2);
+        ctx.fillStyle = c;
+        ctx.fillRect(x - 16, y - 32, 18, 10);
+        ctx.fillRect(x - 24, y - 24, 12, 7);
+        const legOff = frame % 2 === 0 ? 0 : 5;
+        ctx.fillRect(x + 4, y - 14 + legOff, 8, 18 - legOff);
+        ctx.fillRect(x + 17, y - 14 - legOff + 5, 8, 18 - legOff);
+        ctx.fillStyle = a;
+        ctx.fillRect(x + 18, y - 32, 8, 5);
+        if (shooting) {
+          ctx.fillStyle = '#d966ff';
+          ctx.fillRect(x + 34, y - 46, 14, 4);
+          ctx.fillStyle = '#ff99ff';
+          ctx.fillRect(x + 38, y - 48, 6, 2);
+          ctx.fillRect(x + 38, y - 44, 6, 2);
+        }
+      }
+    }
+  },
+  {
+    name: 'Tank', color: '#f39c12', eyeColor: '#1a1a2e', accentColor: '#d68910',
+    desc: 'Armored',
+    draw(ctx, x, y, frame, ducking, invincible, shooting) {
+      const c = invincible ? '#ffe066' : this.color;
+      const a = invincible ? '#ffc200' : this.accentColor;
+      if (ducking) {
+        ctx.fillStyle = c;
+        ctx.fillRect(x - 12, y - 20, 56, 20);
+        ctx.fillStyle = a;
+        ctx.fillRect(x - 12, y - 20, 56, 6);
+        ctx.fillStyle = this.eyeColor;
+        ctx.fillRect(x + 30, y - 15, 5, 5);
+        const legOff = frame % 2 === 0 ? 0 : 3;
+        ctx.fillStyle = c;
+        ctx.fillRect(x + 4, y - 5 + legOff, 10, 8);
+        ctx.fillRect(x + 22, y - 5 - legOff, 10, 8);
+      } else {
+        ctx.fillStyle = c;
+        ctx.fillRect(x - 2, y - 44, 34, 30);
+        ctx.fillRect(x + 6, y - 64, 30, 24);
+        // Armor plates
+        ctx.fillStyle = a;
+        ctx.fillRect(x - 2, y - 44, 34, 6);
+        ctx.fillRect(x - 2, y - 32, 34, 4);
+        ctx.fillStyle = this.eyeColor;
+        ctx.fillRect(x + 26, y - 56, 6, 6);
+        ctx.fillStyle = a;
+        ctx.fillRect(x + 32, y - 46, 4, 2);
+        ctx.fillStyle = c;
+        ctx.fillRect(x - 16, y - 32, 16, 12);
+        ctx.fillRect(x - 24, y - 22, 12, 8);
+        const legOff = frame % 2 === 0 ? 0 : 4;
+        ctx.fillRect(x + 4, y - 16 + legOff, 10, 20 - legOff);
+        ctx.fillRect(x + 19, y - 16 - legOff + 5, 10, 20 - legOff);
+        if (shooting) {
+          ctx.fillStyle = '#ffcc00';
+          ctx.fillRect(x + 36, y - 48, 16, 6);
+        }
+      }
+    }
+  }
+];
+
+// ── Game state ─────────────────────────────────────────────────────────────────
+let state = 'selection';
+let selectedDino = 0;
+let score = 0;
+let hiScore = 0;
+let speed = 5;
+let frame = 0;
+let animFrame = 0;
+
+let dino = { x: 80, y: GROUND, vy: 0, ducking: false, jumping: false, jumpsLeft: 2, shooting: false, shootTimer: 0 };
+let ammo = 3;
+const MAX_AMMO = 6;
+let invincible = false;
+let invincibleTimer = 0;
+let flashTimer = 0;
+
+let obstacles = [];
+let projectiles = [];
+let pickups = [];
+let clouds = [];
+let groundSegs = [];
+
+let obstacleCooldown = 80;
+let pickupCooldown = 700;
+let cloudCooldown = 60;
+let groundX = 0;
+
+// ── Setup dino selection UI ───────────────────────────────────────────────────
+const dinoOptions = document.getElementById('dino-options');
+DINOS.forEach((d, i) => {
+  const div = document.createElement('div');
+  div.className = 'dino-option' + (i === 0 ? ' selected' : '');
+  const c = document.createElement('canvas');
+  c.width = 80; c.height = 80;
+  const tc = c.getContext('2d');
+  tc.fillStyle = '#16213e';
+  tc.fillRect(0, 0, 80, 80);
+  d.draw(tc, 20, 70, 0, false, false, false);
+  div.appendChild(c);
+  const label = document.createElement('div');
+  label.innerHTML = `<b>${d.name}</b><br><span>${d.desc}</span>`;
+  label.style.color = d.color;
+  div.appendChild(label);
+  div.onclick = () => {
+    document.querySelectorAll('.dino-option').forEach(el => el.classList.remove('selected'));
+    div.classList.add('selected');
+    selectedDino = i;
+  };
+  dinoOptions.appendChild(div);
+});
+
+document.getElementById('start-btn').onclick = startGame;
+document.getElementById('restart-btn').onclick = startGame;
+
+// ── Input ─────────────────────────────────────────────────────────────────────
+const keys = {};
+document.addEventListener('keydown', e => {
+  if (keys[e.code]) return;
+  keys[e.code] = true;
+  if (state === 'selection') return;
+  if (state !== 'running') return;
+  if ((e.code === 'Space' || e.code === 'ArrowUp') && dino.jumpsLeft > 0) {
+    dino.vy = -14;
+    dino.jumping = true;
+    dino.jumpsLeft--;
+    dino.ducking = false;
+  }
+  if (e.code === 'ArrowDown') dino.ducking = true;
+  if ((e.code === 'KeyZ' || e.code === 'KeyF') && ammo > 0) {
+    shoot();
+  }
+});
+document.addEventListener('keyup', e => {
+  keys[e.code] = false;
+  if (e.code === 'ArrowDown') dino.ducking = false;
+});
+
+// ── Game functions ─────────────────────────────────────────────────────────────
+function startGame() {
+  document.getElementById('selection-screen').style.display = 'none';
+  document.getElementById('game-over-screen').style.display = 'none';
+  meteor = null;
+  deathParticles = [];
+  deathFrame = 0;
+  state = 'running';
+  score = 0;
+  speed = 5;
+  frame = 0;
+  animFrame = 0;
+  dino = { x: 80, y: GROUND, vy: 0, ducking: false, jumping: false, jumpsLeft: 2, shooting: false, shootTimer: 0 };
+  ammo = 3;
+  invincible = false;
+  invincibleTimer = 0;
+  flashTimer = 0;
+  obstacles = [];
+  projectiles = [];
+  pickups = [];
+  clouds = [];
+  obstacleCooldown = 80;
+  pickupCooldown = 700;
+  cloudCooldown = 60;
+  groundX = 0;
+  requestAnimationFrame(gameLoop);
+}
+
+function shoot() {
+  ammo--;
+  dino.shooting = true;
+  dino.shootTimer = 10;
+  projectiles.push({ x: dino.x + 42, y: dino.y - 46, w: 14, h: 6, speed: 14 });
+  updateAmmoUI();
+}
+
+function updateAmmoUI() {
+  const bar = document.getElementById('ammo-bar');
+  bar.innerHTML = '';
+  for (let i = 0; i < MAX_AMMO; i++) {
+    const b = document.createElement('div');
+    b.className = 'ammo-bullet' + (i < ammo ? '' : ' empty');
+    bar.appendChild(b);
+  }
+}
+
+function spawnObstacle() {
+  const r = Math.random();
+  if (r < 0.55) {
+    // Cactus group
+    const count = Math.floor(Math.random() * 3) + 1;
+    const w = 18 + count * 6;
+    obstacles.push({ type: 'cactus', x: W + 20, y: GROUND, w, h: 40 + Math.random() * 20, count });
+  } else if (r < 0.85) {
+    // Bird (flies at different heights)
+    const heights = [GROUND - 60, GROUND - 100, GROUND - 30];
+    const hy = heights[Math.floor(Math.random() * heights.length)];
+    obstacles.push({ type: 'bird', x: W + 20, y: hy, w: 36, h: 22, wingUp: true, wingTimer: 0 });
+  } else {
+    // Rock
+    obstacles.push({ type: 'rock', x: W + 20, y: GROUND, w: 30, h: 22 });
+  }
+}
+
+function spawnPickup() {
+  const r = Math.random();
+  const y = GROUND - 20 - Math.random() * 60;
+  if (r < 0.90) {
+    pickups.push({ type: 'ammo', x: W + 10, y, w: 22, h: 22, bob: 0 });
+  } else {
+    pickups.push({ type: 'invincible', x: W + 10, y, w: 26, h: 26, bob: 0 });
+  }
+}
+
+function spawnCloud() {
+  clouds.push({ x: W + 50, y: 30 + Math.random() * 80, w: 60 + Math.random() * 60 });
+}
+
+function getDinoHitbox() {
+  if (dino.ducking) {
+    return { x: dino.x - 10, y: dino.y - 18, w: 50, h: 18 };
+  }
+  return { x: dino.x + 2, y: dino.y - 58, w: 32, h: 58 };
+}
+
+function rectsOverlap(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+function gameLoop() {
+  if (state !== 'running') return;
+  update();
+  render();
+  requestAnimationFrame(gameLoop);
+}
+
+function update() {
+  frame++;
+  score++;
+  speed = 5 + score / 800;
+
+  // Dino physics
+  if (dino.y < GROUND || dino.vy !== 0) {
+    dino.vy += 0.8;
+    dino.y += dino.vy;
+    if (dino.y >= GROUND) {
+      dino.y = GROUND;
+      dino.vy = 0;
+      dino.jumping = false;
+      dino.jumpsLeft = 2;
+    }
+  }
+
+  // Shoot timer
+  if (dino.shootTimer > 0) { dino.shootTimer--; }
+  else { dino.shooting = false; }
+
+  // Invincibility
+  if (invincible) {
+    invincibleTimer--;
+    flashTimer++;
+    if (invincibleTimer <= 0) {
+      invincible = false;
+      flashTimer = 0;
+    }
+    const secs = Math.ceil(invincibleTimer / 60);
+    document.getElementById('powerup-display').textContent = `INVINCIBLE: ${secs}s`;
+  } else {
+    document.getElementById('powerup-display').textContent = '';
+  }
+
+  // Spawn
+  obstacleCooldown--;
+  if (obstacleCooldown <= 0) {
+    spawnObstacle();
+    obstacleCooldown = 60 + Math.random() * 80 - speed * 2;
+    if (obstacleCooldown < 35) obstacleCooldown = 35;
+  }
+  pickupCooldown--;
+  if (pickupCooldown <= 0) {
+    spawnPickup();
+    pickupCooldown = 600 + Math.random() * 500;
+  }
+  cloudCooldown--;
+  if (cloudCooldown <= 0) { spawnCloud(); cloudCooldown = 60 + Math.random() * 80; }
+
+  // Move obstacles
+  obstacles.forEach(o => {
+    o.x -= speed;
+    if (o.type === 'bird') {
+      o.wingTimer++;
+      if (o.wingTimer > 15) { o.wingUp = !o.wingUp; o.wingTimer = 0; }
+    }
+  });
+  obstacles = obstacles.filter(o => o.x + o.w > -20);
+
+  // Move pickups
+  pickups.forEach(p => { p.x -= speed * 0.8; p.bob = (p.bob + 0.08) % (Math.PI * 2); });
+  pickups = pickups.filter(p => p.x + p.w > -20);
+
+  // Move projectiles
+  projectiles.forEach(p => { p.x += p.speed; });
+  projectiles = projectiles.filter(p => p.x < W + 20);
+
+  // Move clouds
+  clouds.forEach(c => { c.x -= speed * 0.3; });
+  clouds = clouds.filter(c => c.x + c.w > -10);
+
+  // Ground
+  groundX -= speed;
+  if (groundX < -40) groundX += 40;
+
+  // Animation frame
+  if (!dino.ducking || dino.y < GROUND) animFrame = Math.floor(frame / 8) % 2;
+  else animFrame = Math.floor(frame / 6) % 2;
+
+  // Projectile vs obstacle collision
+  projectiles = projectiles.filter(proj => {
+    const pBox = { x: proj.x, y: proj.y, w: proj.w, h: proj.h };
+    let hit = false;
+    obstacles = obstacles.filter(o => {
+      const oBox = { x: o.x, y: o.y - o.h, w: o.w, h: o.h };
+      if (rectsOverlap(pBox, oBox)) { hit = true; return false; }
+      return true;
+    });
+    return !hit;
+  });
+
+  // Dino vs obstacle collision
+  if (!invincible) {
+    const dinoBox = getDinoHitbox();
+    for (const o of obstacles) {
+      const oBox = { x: o.x + 3, y: o.y - o.h + 3, w: o.w - 6, h: o.h - 3 };
+      if (rectsOverlap(dinoBox, oBox)) {
+        gameOver();
+        return;
+      }
+    }
+  }
+
+  // Dino vs pickup
+  const dinoBox = getDinoHitbox();
+  pickups = pickups.filter(p => {
+    const pBox = { x: p.x, y: p.y - p.h / 2, w: p.w, h: p.h };
+    if (rectsOverlap(dinoBox, pBox)) {
+      if (p.type === 'ammo') {
+        ammo = Math.min(ammo + 2, MAX_AMMO);
+        updateAmmoUI();
+      } else if (p.type === 'invincible') {
+        invincible = true;
+        invincibleTimer = 60 * 30; // 30 seconds
+      }
+      return false;
+    }
+    return true;
+  });
+
+  // Score display
+  document.getElementById('score').textContent = score;
+}
+
+function render() {
+  ctx.clearRect(0, 0, W, H);
+
+  // Sky gradient
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#0a0a1a');
+  grad.addColorStop(1, '#16213e');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  // Stars
+  ctx.fillStyle = '#ffffff33';
+  for (let i = 0; i < 40; i++) {
+    const sx = (i * 173 + frame * 0.1) % W;
+    const sy = (i * 97) % (H - 80);
+    ctx.fillRect(sx, sy, 1, 1);
+  }
+
+  // Clouds
+  ctx.fillStyle = '#1e3a5f66';
+  clouds.forEach(c => {
+    ctx.beginPath();
+    ctx.ellipse(c.x + c.w * 0.3, c.y, c.w * 0.3, 14, 0, 0, Math.PI * 2);
+    ctx.ellipse(c.x + c.w * 0.6, c.y - 6, c.w * 0.25, 12, 0, 0, Math.PI * 2);
+    ctx.ellipse(c.x + c.w * 0.7, c.y + 4, c.w * 0.2, 10, 0, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  // Ground
+  ctx.fillStyle = '#0f3460';
+  ctx.fillRect(0, GROUND, W, H - GROUND);
+  ctx.fillStyle = '#4ecca3';
+  ctx.fillRect(0, GROUND, W, 3);
+  // Ground dots
+  ctx.fillStyle = '#1a4a7a';
+  for (let gx = groundX; gx < W; gx += 40) {
+    ctx.fillRect(gx, GROUND + 8, 20, 3);
+  }
+
+  // Pickups
+  pickups.forEach(p => {
+    const py = p.y + Math.sin(p.bob) * 6;
+    if (p.type === 'ammo') {
+      // Ammo box
+      ctx.fillStyle = '#f5a623';
+      ctx.fillRect(p.x, py - 11, 22, 22);
+      ctx.fillStyle = '#d4890f';
+      ctx.fillRect(p.x, py - 11, 22, 6);
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 10px Courier New';
+      ctx.fillText('+3', p.x + 3, py + 5);
+      // Glow
+      ctx.strokeStyle = '#f5a62388';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(p.x - 3, py - 14, 28, 28);
+    } else {
+      // Invincibility star
+      ctx.fillStyle = '#ffe066';
+      drawStar(ctx, p.x + 13, py, 14, 7, 5);
+      ctx.fillStyle = '#fff8';
+      ctx.font = 'bold 8px Courier New';
+      ctx.fillText('INV', p.x + 2, py + 3);
+      ctx.strokeStyle = '#ffe06688';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(p.x + 13, py, 18, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  });
+
+  // Obstacles
+  obstacles.forEach(o => {
+    if (o.type === 'cactus') drawCactus(ctx, o);
+    else if (o.type === 'bird') drawBird(ctx, o);
+    else if (o.type === 'rock') drawRock(ctx, o);
+  });
+
+  // Projectiles
+  projectiles.forEach(p => {
+    const dinoData = DINOS[selectedDino];
+    ctx.fillStyle = dinoData.eyeColor === '#fff' ? '#ff6b00' : dinoData.color === '#9b59b6' ? '#d966ff' : '#ffe066';
+    ctx.fillRect(p.x, p.y, p.w, p.h);
+    ctx.fillStyle = '#fff6';
+    ctx.fillRect(p.x + 2, p.y + 1, p.w - 4, 2);
+    // Trail
+    ctx.fillStyle = dinoData.color + '44';
+    ctx.fillRect(p.x - 8, p.y + 1, 8, p.h - 2);
+  });
+
+  // Dino
+  const dinoData = DINOS[selectedDino];
+  const isFlashing = invincible && Math.floor(flashTimer / 4) % 2 === 0;
+  if (!isFlashing) {
+    dinoData.draw(ctx, dino.x, dino.y, animFrame, dino.ducking, invincible, dino.shooting);
+  }
+
+  // HiScore
+  if (hiScore > 0) {
+    ctx.fillStyle = '#ffffff33';
+    ctx.font = '13px Courier New';
+    ctx.fillText(`HI: ${hiScore}`, W - 90, 22);
+  }
+}
+
+function drawCactus(ctx, o) {
+  ctx.fillStyle = '#27ae60';
+  // Main stem
+  ctx.fillRect(o.x + o.w / 2 - 6, o.y - o.h, 12, o.h);
+  // Arms
+  if (o.count >= 2) {
+    ctx.fillRect(o.x, o.y - o.h * 0.65, o.w / 2 - 2, 8);
+    ctx.fillRect(o.x, o.y - o.h * 0.85, 8, o.h * 0.22);
+  }
+  if (o.count >= 3) {
+    ctx.fillRect(o.x + o.w / 2 + 2, o.y - o.h * 0.55, o.w / 2, 8);
+    ctx.fillRect(o.x + o.w - 10, o.y - o.h * 0.78, 8, o.h * 0.25);
+  }
+  ctx.fillStyle = '#2ecc71';
+  ctx.fillRect(o.x + o.w / 2 - 5, o.y - o.h, 4, o.h);
+}
+
+function drawBird(ctx, o) {
+  ctx.fillStyle = '#e74c3c';
+  // Body
+  ctx.fillRect(o.x + 8, o.y - 10, 20, 14);
+  // Head
+  ctx.fillRect(o.x + 24, o.y - 16, 12, 12);
+  // Eye
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(o.x + 32, o.y - 14, 3, 3);
+  // Beak
+  ctx.fillStyle = '#f39c12';
+  ctx.fillRect(o.x + 36, o.y - 12, 6, 3);
+  // Wings
+  ctx.fillStyle = '#c0392b';
+  if (o.wingUp) {
+    ctx.fillRect(o.x, o.y - 18, 24, 8);
+    ctx.fillRect(o.x + 4, o.y - 24, 16, 8);
+  } else {
+    ctx.fillRect(o.x, o.y - 6, 24, 8);
+    ctx.fillRect(o.x + 4, o.y + 2, 14, 6);
+  }
+}
+
+function drawRock(ctx, o) {
+  ctx.fillStyle = '#7f8c8d';
+  ctx.beginPath();
+  ctx.moveTo(o.x + 4, o.y);
+  ctx.lineTo(o.x, o.y - 10);
+  ctx.lineTo(o.x + 8, o.y - o.h);
+  ctx.lineTo(o.x + 18, o.y - o.h + 2);
+  ctx.lineTo(o.x + o.w, o.y - 8);
+  ctx.lineTo(o.x + o.w - 2, o.y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#95a5a6';
+  ctx.beginPath();
+  ctx.moveTo(o.x + 8, o.y - o.h);
+  ctx.lineTo(o.x + 14, o.y - o.h + 6);
+  ctx.lineTo(o.x + 6, o.y - 12);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function drawStar(ctx, cx, cy, outerR, innerR, points) {
+  ctx.beginPath();
+  for (let i = 0; i < points * 2; i++) {
+    const r = i % 2 === 0 ? outerR : innerR;
+    const angle = (i * Math.PI) / points - Math.PI / 2;
+    const x = cx + r * Math.cos(angle);
+    const y = cy + r * Math.sin(angle);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.fill();
+}
+
+// ── Meteor death animation ─────────────────────────────────────────────────────
+let meteor = null;
+let deathParticles = [];
+let deathFrame = 0;
+const DEATH_DURATION = 210; // ~3.5s at 60fps
+
+function gameOver() {
+  state = 'dying';
+  if (score > hiScore) hiScore = score;
+  deathFrame = 0;
+  deathParticles = [];
+  // Meteor starts top-right, aimed at dino
+  meteor = {
+    x: W * 0.75, y: -60,
+    tx: dino.x + 10, ty: GROUND - 10,
+    r: 28, tail: [], impacted: false, impactFrame: -1
+  };
+  requestAnimationFrame(deathLoop);
+}
+
+function deathLoop() {
+  if (state !== 'dying') return;
+  deathFrame++;
+
+  const IMPACT_F = 75;  // frame at which meteor hits
+  const t = deathFrame / IMPACT_F;
+
+  ctx.clearRect(0, 0, W, H);
+
+  // ── Background ──
+  const bgAlpha = deathFrame > IMPACT_F ? Math.min((deathFrame - IMPACT_F) / 60, 1) : 0;
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, `rgb(${Math.floor(10 + bgAlpha * 60)},${Math.floor(10 - bgAlpha * 5)},${Math.floor(26 + bgAlpha * 5)})`);
+  grad.addColorStop(1, `rgb(${Math.floor(22 + bgAlpha * 80)},${Math.floor(33 - bgAlpha * 20)},${Math.floor(62 - bgAlpha * 30)})`);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  // ── Ground cracks after impact ──
+  const groundColor = deathFrame > IMPACT_F ? `rgb(${Math.floor(15 + bgAlpha*50)},${Math.floor(48 - bgAlpha*30)},${Math.floor(96 - bgAlpha*60)})` : '#0f3460';
+  ctx.fillStyle = groundColor;
+  ctx.fillRect(0, GROUND, W, H - GROUND);
+  ctx.fillStyle = '#4ecca3';
+  ctx.fillRect(0, GROUND, W, 3);
+
+  if (deathFrame > IMPACT_F) {
+    const cf = deathFrame - IMPACT_F;
+    ctx.strokeStyle = '#ff4400';
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 8; i++) {
+      const angle = (i / 8) * Math.PI * 2 + 0.3;
+      const len = Math.min(cf * 4, 60 + i * 15);
+      ctx.beginPath();
+      ctx.moveTo(meteor.tx, GROUND);
+      ctx.lineTo(meteor.tx + Math.cos(angle) * len, GROUND + Math.sin(angle) * len * 0.4);
+      ctx.stroke();
+    }
+    // Lava glow in cracks
+    ctx.fillStyle = `rgba(255,${Math.floor(80 - cf)},0,${Math.min(cf / 30, 0.6)})`;
+    for (let i = 0; i < 6; i++) {
+      const angle = (i / 6) * Math.PI * 2;
+      const len = Math.min(cf * 3, 40 + i * 10);
+      ctx.fillRect(meteor.tx + Math.cos(angle) * len - 2, GROUND - 2, 4, 4);
+    }
+  }
+
+  // Ground dots
+  ctx.fillStyle = deathFrame > IMPACT_F ? '#331100' : '#1a4a7a';
+  for (let gx = groundX; gx < W; gx += 40) ctx.fillRect(gx, GROUND + 8, 20, 3);
+
+  // ── Dino (disappears at impact) ──
+  if (deathFrame <= IMPACT_F + 5) {
+    const dinoData = DINOS[selectedDino];
+    dinoData.draw(ctx, dino.x, dino.y, 0, false, false, false);
+  }
+
+  // ── Meteor trail & body (pre-impact) ──
+  if (deathFrame <= IMPACT_F) {
+    const mx = meteor.x + (meteor.tx - meteor.x) * t;
+    const my = meteor.y + (meteor.ty - meteor.y) * t;
+    // Save trail point
+    meteor.tail.push({ x: mx, y: my });
+    if (meteor.tail.length > 22) meteor.tail.shift();
+
+    // Tail glow
+    for (let i = 0; i < meteor.tail.length; i++) {
+      const tp = meteor.tail[i];
+      const alpha = (i / meteor.tail.length) * 0.7;
+      const tr = meteor.r * 0.25 + (i / meteor.tail.length) * meteor.r * 0.5;
+      const tg = ctx.createRadialGradient(tp.x, tp.y, 0, tp.x, tp.y, tr * 1.8);
+      tg.addColorStop(0, `rgba(255,180,60,${alpha})`);
+      tg.addColorStop(1, 'rgba(255,60,0,0)');
+      ctx.fillStyle = tg;
+      ctx.beginPath();
+      ctx.arc(tp.x, tp.y, tr * 1.8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Meteor body glow
+    const mg = ctx.createRadialGradient(mx, my, 0, mx, my, meteor.r * 2.2);
+    mg.addColorStop(0, 'rgba(255,220,100,0.9)');
+    mg.addColorStop(0.4, 'rgba(255,100,20,0.6)');
+    mg.addColorStop(1, 'rgba(200,30,0,0)');
+    ctx.fillStyle = mg;
+    ctx.beginPath();
+    ctx.arc(mx, my, meteor.r * 2.2, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Rock surface
+    ctx.fillStyle = '#555';
+    ctx.beginPath();
+    ctx.arc(mx, my, meteor.r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#888';
+    ctx.beginPath();
+    ctx.arc(mx - meteor.r * 0.3, my - meteor.r * 0.3, meteor.r * 0.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#333';
+    ctx.beginPath();
+    ctx.arc(mx + meteor.r * 0.2, my + meteor.r * 0.1, meteor.r * 0.3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Screen shake pre-impact warning
+    if (t > 0.7) {
+      const shake = (t - 0.7) / 0.3 * 3;
+      ctx.save();
+      ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
+      ctx.restore();
+    }
+
+    // Impact — spawn particles
+    if (deathFrame === IMPACT_F) {
+      for (let i = 0; i < 60; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const spd = 2 + Math.random() * 8;
+        deathParticles.push({
+          x: meteor.tx, y: GROUND,
+          vx: Math.cos(angle) * spd,
+          vy: -Math.abs(Math.sin(angle)) * spd - Math.random() * 4,
+          r: 3 + Math.random() * 8,
+          life: 1,
+          decay: 0.012 + Math.random() * 0.02,
+          color: Math.random() < 0.5 ? '#ff6600' : (Math.random() < 0.5 ? '#ffcc00' : '#ff3300')
+        });
+      }
+      // Debris chunks
+      for (let i = 0; i < 20; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const spd = 1 + Math.random() * 5;
+        deathParticles.push({
+          x: meteor.tx, y: GROUND,
+          vx: Math.cos(angle) * spd,
+          vy: -3 - Math.random() * 6,
+          r: 4 + Math.random() * 10,
+          life: 1,
+          decay: 0.008 + Math.random() * 0.012,
+          color: Math.random() < 0.5 ? '#888' : '#555',
+          square: true
+        });
+      }
+    }
+  }
+
+  // ── Explosion flash ──
+  if (deathFrame >= IMPACT_F && deathFrame < IMPACT_F + 18) {
+    const flashAlpha = 1 - (deathFrame - IMPACT_F) / 18;
+    ctx.fillStyle = `rgba(255,220,100,${flashAlpha * 0.85})`;
+    ctx.fillRect(0, 0, W, H);
+    // Shockwave ring
+    const ring = (deathFrame - IMPACT_F) / 18;
+    ctx.strokeStyle = `rgba(255,180,60,${flashAlpha})`;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(meteor.tx, GROUND, ring * 180, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  // ── Particles ──
+  deathParticles.forEach(p => {
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vy += 0.25;
+    p.life -= p.decay;
+    if (p.life <= 0) return;
+    ctx.globalAlpha = Math.max(p.life, 0);
+    ctx.fillStyle = p.color;
+    if (p.square) ctx.fillRect(p.x - p.r / 2, p.y - p.r / 2, p.r, p.r);
+    else { ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill(); }
+  });
+  deathParticles = deathParticles.filter(p => p.life > 0);
+  ctx.globalAlpha = 1;
+
+  // ── Smoke columns ──
+  if (deathFrame > IMPACT_F + 10) {
+    const sf = deathFrame - IMPACT_F - 10;
+    for (let i = 0; i < 5; i++) {
+      const sx = meteor.tx + (i - 2) * 30;
+      const sh = Math.min(sf * 1.5, 80 + i * 20);
+      const alpha = Math.min(sf / 40, 0.5);
+      ctx.fillStyle = `rgba(80,40,20,${alpha})`;
+      for (let j = 0; j < 4; j++) {
+        ctx.beginPath();
+        ctx.arc(sx + j * 8 - 12, GROUND - sh * (j / 3) - 10, 16 + j * 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  // ── Darkness vignette as animation ends ──
+  if (deathFrame > IMPACT_F + 80) {
+    const da = Math.min((deathFrame - IMPACT_F - 80) / 60, 1);
+    ctx.fillStyle = `rgba(0,0,0,${da * 0.7})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  if (deathFrame < DEATH_DURATION) {
+    requestAnimationFrame(deathLoop);
+  } else {
+    state = 'gameover';
+    document.getElementById('final-score').textContent = `Score: ${score}  |  Best: ${hiScore}`;
+    document.getElementById('game-over-screen').style.display = 'flex';
+  }
+}
+
+// Init ammo bar
+updateAmmoUI();
+</script>
+</body>
+</html>
