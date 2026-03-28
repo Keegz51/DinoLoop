@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>Dino Runner</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -31,10 +32,26 @@
   #restart-btn { padding: 10px 30px; background: #4ecca3; color: #16213e; border: none; border-radius: 6px; font-size: 1.1rem; cursor: pointer; font-family: inherit; font-weight: bold; transition: background 0.2s; }
   #restart-btn:hover { background: #3ab891; }
   #controls { margin-top: 10px; font-size: 0.8rem; color: #555; text-align: center; }
+  /* ── Mobile scaling ── */
+  #scale-wrapper { transform-origin: top center; }
+  /* ── Touch buttons (overlaid on canvas, hidden on desktop) ── */
+  #touch-controls { display: none; position: absolute; bottom: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; }
+  .touch-btn { pointer-events: all; position: absolute; background: rgba(255,255,255,0.12); border: 2px solid rgba(255,255,255,0.25); border-radius: 50%; color: #fff; font-family: 'Courier New', monospace; font-weight: bold; cursor: pointer; user-select: none; -webkit-user-select: none; display: flex; align-items: center; justify-content: center; transition: background 0.1s; }
+  .touch-btn:active, .touch-btn.pressed { background: rgba(255,255,255,0.3); border-color: rgba(255,255,255,0.6); }
+  #btn-jump  { width: 70px; height: 70px; font-size: 1.4rem; bottom: 20px; left: 20px; }
+  #btn-duck  { width: 50px; height: 50px; font-size: 1.1rem; bottom: 22px; left: 100px; }
+  #btn-shoot { width: 70px; height: 70px; font-size: 1rem;   bottom: 20px; right: 20px; background: rgba(245,166,35,0.2); border-color: rgba(245,166,35,0.5); }
+  #btn-shoot:active, #btn-shoot.pressed { background: rgba(245,166,35,0.4); }
+  @media (hover: none) and (pointer: coarse) {
+    #touch-controls { display: block; }
+    #controls { display: none; }
+    h1 { font-size: 1.6rem; }
+  }
 </style>
 </head>
 <body>
 <h1>DINO RUNNER</h1>
+<div id="scale-wrapper">
 <div id="ui">
   <div id="score-display">SCORE: <span id="score">0</span></div>
   <div id="ammo-display"><span style="color:#f5a623">AMMO: </span><span id="ammo-bar" style="display:inline-flex;gap:3px;vertical-align:middle"></span></div>
@@ -52,6 +69,12 @@
     <div id="final-score"></div>
     <button id="restart-btn">PLAY AGAIN</button>
   </div>
+  <div id="touch-controls">
+    <button class="touch-btn" id="btn-jump">▲</button>
+    <button class="touch-btn" id="btn-duck">▼</button>
+    <button class="touch-btn" id="btn-shoot">FIRE</button>
+  </div>
+</div>
 </div>
 <div id="controls">SPACE / UP = Jump &nbsp;|&nbsp; DOWN = Duck &nbsp;|&nbsp; Z / F = Shoot &nbsp;|&nbsp; Double Jump allowed</div>
 
@@ -325,6 +348,44 @@ document.addEventListener('keyup', e => {
   keys[e.code] = false;
   if (e.code === 'ArrowDown') dino.ducking = false;
 });
+
+// ── Canvas scaling ─────────────────────────────────────────────────────────────
+function scaleToFit() {
+  const padding = 16;
+  const availW = window.innerWidth - padding;
+  const scale = Math.min(availW / 800, 1);
+  document.getElementById('scale-wrapper').style.transform = `scale(${scale})`;
+  // Compensate the vertical space the wrapper no longer occupies after shrinking
+  const shrinkH = (1 - scale) * (300 + 60); // canvas + ui height approx
+  document.getElementById('scale-wrapper').style.marginBottom = `-${shrinkH}px`;
+}
+scaleToFit();
+window.addEventListener('resize', scaleToFit);
+
+// ── Touch controls ─────────────────────────────────────────────────────────────
+function touchJump() {
+  if (state !== 'running') return;
+  if (dino.jumpsLeft > 0) {
+    dino.vy = -14;
+    dino.jumping = true;
+    dino.jumpsLeft--;
+    dino.ducking = false;
+  }
+}
+function touchDuckOn()  { if (state === 'running') dino.ducking = true; }
+function touchDuckOff() { dino.ducking = false; }
+function touchShoot()   { if (state === 'running' && ammo > 0) shoot(); }
+
+const btnJump  = document.getElementById('btn-jump');
+const btnDuck  = document.getElementById('btn-duck');
+const btnShoot = document.getElementById('btn-shoot');
+
+btnJump.addEventListener('touchstart',  e => { e.preventDefault(); touchJump(); btnJump.classList.add('pressed'); },    { passive: false });
+btnJump.addEventListener('touchend',    e => { e.preventDefault(); btnJump.classList.remove('pressed'); },              { passive: false });
+btnDuck.addEventListener('touchstart',  e => { e.preventDefault(); touchDuckOn();  btnDuck.classList.add('pressed'); },  { passive: false });
+btnDuck.addEventListener('touchend',    e => { e.preventDefault(); touchDuckOff(); btnDuck.classList.remove('pressed'); },{ passive: false });
+btnShoot.addEventListener('touchstart', e => { e.preventDefault(); touchShoot(); btnShoot.classList.add('pressed'); },   { passive: false });
+btnShoot.addEventListener('touchend',   e => { e.preventDefault(); btnShoot.classList.remove('pressed'); },              { passive: false });
 
 // ── Game functions ─────────────────────────────────────────────────────────────
 function startGame() {
