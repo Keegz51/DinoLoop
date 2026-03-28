@@ -17,6 +17,10 @@
   .ammo-bullet { width: 10px; height: 18px; background: #f5a623; border-radius: 2px; transition: background 0.2s; }
   .ammo-bullet.empty { background: #333; }
   #powerup-display { font-size: 0.9rem; color: #4ecca3; min-width: 140px; text-align: right; }
+  #health-display { display: flex; align-items: center; gap: 5px; font-size: 0.9rem; }
+  #health-display .hp-label { color: #aaa; margin-right: 2px; }
+  .heart { font-size: 1.3rem; line-height: 1; color: #ff2244; transition: transform 0.15s; }
+  .heart.empty { opacity: 0.22; }
   #selection-screen { position: absolute; top: 0; left: 0; width: 800px; height: 300px; background: #16213eee; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; border-radius: 6px; z-index: 10; }
   #selection-screen h2 { font-size: 1.8rem; color: #4ecca3; }
   #dino-options { display: flex; gap: 20px; }
@@ -42,6 +46,8 @@
   #btn-duck  { width: 50px; height: 50px; font-size: 1.1rem; bottom: 22px; left: 100px; }
   #btn-shoot { width: 70px; height: 70px; font-size: 1rem;   bottom: 20px; right: 20px; background: rgba(245,166,35,0.2); border-color: rgba(245,166,35,0.5); }
   #btn-shoot:active, #btn-shoot.pressed { background: rgba(245,166,35,0.4); }
+  #btn-heal  { width: 55px; height: 55px; font-size: 0.8rem; bottom: 100px; right: 24px; background: rgba(255,34,68,0.2); border-color: rgba(255,34,68,0.5); }
+  #btn-heal:active, #btn-heal.pressed { background: rgba(255,34,68,0.4); }
   @media (hover: none) and (pointer: coarse) {
     #touch-controls { display: block; }
     #controls { display: none; }
@@ -54,6 +60,7 @@
 <div id="scale-wrapper">
 <div id="ui">
   <div id="score-display">SCORE: <span id="score">0</span></div>
+  <div id="health-display"><span>HP:</span></div>
   <div id="ammo-display"><span style="color:#f5a623">AMMO: </span><span id="ammo-bar" style="display:inline-flex;gap:3px;vertical-align:middle"></span></div>
   <div id="powerup-display" id="powerup-display"></div>
 </div>
@@ -73,10 +80,11 @@
     <button class="touch-btn" id="btn-jump">▲</button>
     <button class="touch-btn" id="btn-duck">▼</button>
     <button class="touch-btn" id="btn-shoot">FIRE</button>
+    <button class="touch-btn" id="btn-heal">❤-5</button>
   </div>
 </div>
 </div>
-<div id="controls">SPACE / UP = Jump &nbsp;|&nbsp; DOWN = Duck &nbsp;|&nbsp; Z / F = Shoot &nbsp;|&nbsp; Double Jump allowed</div>
+<div id="controls">SPACE / UP = Jump &nbsp;|&nbsp; DOWN = Duck &nbsp;|&nbsp; Z / F = Shoot &nbsp;|&nbsp; H / E = Heal (5 ammo) &nbsp;|&nbsp; Double Jump allowed</div>
 
 <script>
 const canvas = document.getElementById('canvas');
@@ -88,7 +96,7 @@ const GROUND = H - 50;
 const DINOS = [
   {
     name: 'Rex', color: '#4ecca3', eyeColor: '#16213e', accentColor: '#38b296',
-    desc: 'Balanced',
+    desc: 'Balanced', maxAmmo: 6, startAmmo: 3, maxHealth: 3, speedBonus: 0, hasRevive: false,
     draw(ctx, x, y, frame, ducking, invincible, shooting) {
       const c = invincible ? '#ffe066' : this.color;
       const a = invincible ? '#ffc200' : this.accentColor;
@@ -143,7 +151,7 @@ const DINOS = [
   },
   {
     name: 'Spike', color: '#e94560', eyeColor: '#fff', accentColor: '#c73652',
-    desc: 'Fast & Fiery',
+    desc: 'Fast & More Ammo', maxAmmo: 10, startAmmo: 10, maxHealth: 2, speedBonus: 2, hasRevive: false,
     draw(ctx, x, y, frame, ducking, invincible, shooting) {
       const c = invincible ? '#ffe066' : this.color;
       const a = invincible ? '#ffc200' : this.accentColor;
@@ -185,7 +193,7 @@ const DINOS = [
   },
   {
     name: 'Blaze', color: '#9b59b6', eyeColor: '#ffe066', accentColor: '#7d3c98',
-    desc: 'Mystic Power',
+    desc: 'One Revive', maxAmmo: 6, startAmmo: 3, maxHealth: 3, speedBonus: 0, hasRevive: true,
     draw(ctx, x, y, frame, ducking, invincible, shooting) {
       const c = invincible ? '#ffe066' : this.color;
       const a = invincible ? '#ffc200' : this.accentColor;
@@ -230,7 +238,7 @@ const DINOS = [
   },
   {
     name: 'Tank', color: '#f39c12', eyeColor: '#1a1a2e', accentColor: '#d68910',
-    desc: 'Armored',
+    desc: '5 HP Armored', maxAmmo: 6, startAmmo: 3, maxHealth: 5, speedBonus: 0, hasRevive: false,
     draw(ctx, x, y, frame, ducking, invincible, shooting) {
       const c = invincible ? '#ffe066' : this.color;
       const a = invincible ? '#ffc200' : this.accentColor;
@@ -283,7 +291,11 @@ let animFrame = 0;
 
 let dino = { x: 80, y: GROUND, vy: 0, ducking: false, jumping: false, jumpsLeft: 2, shooting: false, shootTimer: 0 };
 let ammo = 3;
-const MAX_AMMO = 6;
+let MAX_AMMO = 6;
+let health = 3;
+let MAX_HEALTH = 3;
+let hitTimer = 0;
+let reviveAvailable = false;
 let invincible = false;
 let invincibleTimer = 0;
 let flashTimer = 0;
@@ -324,7 +336,11 @@ DINOS.forEach((d, i) => {
 });
 
 document.getElementById('start-btn').onclick = startGame;
-document.getElementById('restart-btn').onclick = startGame;
+document.getElementById('restart-btn').onclick = () => {
+  document.getElementById('game-over-screen').style.display = 'none';
+  document.getElementById('selection-screen').style.display = 'flex';
+  state = 'selection';
+};
 
 // ── Input ─────────────────────────────────────────────────────────────────────
 const keys = {};
@@ -342,6 +358,9 @@ document.addEventListener('keydown', e => {
   if (e.code === 'ArrowDown') dino.ducking = true;
   if ((e.code === 'KeyZ' || e.code === 'KeyF') && ammo > 0) {
     shoot();
+  }
+  if (e.code === 'KeyH' || e.code === 'KeyE') {
+    healWithAmmo();
   }
 });
 document.addEventListener('keyup', e => {
@@ -386,6 +405,9 @@ btnDuck.addEventListener('touchstart',  e => { e.preventDefault(); touchDuckOn()
 btnDuck.addEventListener('touchend',    e => { e.preventDefault(); touchDuckOff(); btnDuck.classList.remove('pressed'); },{ passive: false });
 btnShoot.addEventListener('touchstart', e => { e.preventDefault(); touchShoot(); btnShoot.classList.add('pressed'); },   { passive: false });
 btnShoot.addEventListener('touchend',   e => { e.preventDefault(); btnShoot.classList.remove('pressed'); },              { passive: false });
+const btnHeal = document.getElementById('btn-heal');
+btnHeal.addEventListener('touchstart', e => { e.preventDefault(); healWithAmmo(); btnHeal.classList.add('pressed'); }, { passive: false });
+btnHeal.addEventListener('touchend',   e => { e.preventDefault(); btnHeal.classList.remove('pressed'); },             { passive: false });
 
 // ── Game functions ─────────────────────────────────────────────────────────────
 function startGame() {
@@ -400,10 +422,18 @@ function startGame() {
   frame = 0;
   animFrame = 0;
   dino = { x: 80, y: GROUND, vy: 0, ducking: false, jumping: false, jumpsLeft: 2, shooting: false, shootTimer: 0 };
-  ammo = 3;
+  const dinoStats = DINOS[selectedDino];
+  MAX_AMMO = dinoStats.maxAmmo;
+  MAX_HEALTH = dinoStats.maxHealth;
+  reviveAvailable = dinoStats.hasRevive;
+  ammo = dinoStats.startAmmo;
+  health = MAX_HEALTH;
+  hitTimer = 0;
   invincible = false;
   invincibleTimer = 0;
   flashTimer = 0;
+  updateAmmoUI();
+  updateHealthUI();
   obstacles = [];
   projectiles = [];
   pickups = [];
@@ -423,6 +453,16 @@ function shoot() {
   updateAmmoUI();
 }
 
+function healWithAmmo() {
+  if (state !== 'running') return;
+  if (ammo < 5) return;
+  if (health >= MAX_HEALTH) return;
+  ammo -= 5;
+  health++;
+  updateAmmoUI();
+  updateHealthUI();
+}
+
 function updateAmmoUI() {
   const bar = document.getElementById('ammo-bar');
   bar.innerHTML = '';
@@ -430,6 +470,17 @@ function updateAmmoUI() {
     const b = document.createElement('div');
     b.className = 'ammo-bullet' + (i < ammo ? '' : ' empty');
     bar.appendChild(b);
+  }
+}
+
+function updateHealthUI() {
+  const el = document.getElementById('health-display');
+  el.innerHTML = '<span class="hp-label">HP:</span>';
+  for (let i = 0; i < MAX_HEALTH; i++) {
+    const h = document.createElement('span');
+    h.className = 'heart' + (i < health ? '' : ' empty');
+    h.textContent = '❤';
+    el.appendChild(h);
   }
 }
 
@@ -454,8 +505,10 @@ function spawnObstacle() {
 function spawnPickup() {
   const r = Math.random();
   const y = GROUND - 20 - Math.random() * 60;
-  if (r < 0.90) {
+  if (r < 0.78) {
     pickups.push({ type: 'ammo', x: W + 10, y, w: 22, h: 22, bob: 0 });
+  } else if (r < 0.92) {
+    pickups.push({ type: 'health', x: W + 10, y, w: 24, h: 24, bob: 0 });
   } else {
     pickups.push({ type: 'invincible', x: W + 10, y, w: 26, h: 26, bob: 0 });
   }
@@ -486,7 +539,7 @@ function gameLoop() {
 function update() {
   frame++;
   score++;
-  speed = 5 + score / 800;
+  speed = 5 + DINOS[selectedDino].speedBonus + score / 800;
 
   // Dino physics
   if (dino.y < GROUND || dino.vy !== 0) {
@@ -503,6 +556,9 @@ function update() {
   // Shoot timer
   if (dino.shootTimer > 0) { dino.shootTimer--; }
   else { dino.shooting = false; }
+
+  // Hit invincibility cooldown
+  if (hitTimer > 0) hitTimer--;
 
   // Invincibility
   if (invincible) {
@@ -537,11 +593,11 @@ function update() {
   obstacles.forEach(o => {
     o.x -= speed;
     if (o.type === 'bird') {
-      o.wingTimer++;
-      if (o.wingTimer > 15) { o.wingUp = !o.wingUp; o.wingTimer = 0; }
+      if (o.flattened) { o.flattenTimer--; }
+      else { o.wingTimer++; if (o.wingTimer > 15) { o.wingUp = !o.wingUp; o.wingTimer = 0; } }
     }
   });
-  obstacles = obstacles.filter(o => o.x + o.w > -20);
+  obstacles = obstacles.filter(o => o.x + o.w > -20 && !(o.flattened && o.flattenTimer <= 0));
 
   // Move pickups
   pickups.forEach(p => { p.x -= speed * 0.8; p.bob = (p.bob + 0.08) % (Math.PI * 2); });
@@ -575,14 +631,50 @@ function update() {
     return !hit;
   });
 
-  // Dino vs obstacle collision
-  if (!invincible) {
+  // Flatten birds while invincible
+  if (invincible) {
     const dinoBox = getDinoHitbox();
-    for (const o of obstacles) {
+    obstacles.forEach(o => {
+      if (o.type === 'bird' && !o.flattened) {
+        const oBox = { x: o.x + 3, y: o.y - o.h + 3, w: o.w - 6, h: o.h - 3 };
+        if (rectsOverlap(dinoBox, oBox)) { o.flattened = true; o.flattenTimer = 28; }
+      }
+    });
+  }
+
+  // Dino vs obstacle collision
+  if (!invincible && hitTimer === 0) {
+    const dinoBox = getDinoHitbox();
+    for (let i = obstacles.length - 1; i >= 0; i--) {
+      const o = obstacles[i];
+      if (o.flattened) continue;
       const oBox = { x: o.x + 3, y: o.y - o.h + 3, w: o.w - 6, h: o.h - 3 };
-      if (rectsOverlap(dinoBox, oBox)) {
-        gameOver();
-        return;
+      if (!rectsOverlap(dinoBox, oBox)) continue;
+      // Bird stomp — dino falling and feet near bird's top surface
+      if (o.type === 'bird' && dino.vy > 0 && dino.y <= o.y - o.h + 12) {
+        o.flattened = true;
+        o.flattenTimer = 28;
+        dino.vy = -11;
+        dino.jumpsLeft = Math.max(dino.jumpsLeft, 1);
+      } else {
+        health--;
+        updateHealthUI();
+        if (health <= 0) {
+          if (reviveAvailable) {
+            reviveAvailable = false;
+            health = 1;
+            updateHealthUI();
+            hitTimer = 180;
+            document.getElementById('powerup-display').textContent = 'REVIVED!';
+            setTimeout(() => {
+              if (state === 'running') document.getElementById('powerup-display').textContent = '';
+            }, 2000);
+          } else {
+            gameOver(); return;
+          }
+        } else {
+          hitTimer = 100;
+        }
       }
     }
   }
@@ -595,9 +687,11 @@ function update() {
       if (p.type === 'ammo') {
         ammo = Math.min(ammo + 2, MAX_AMMO);
         updateAmmoUI();
+      } else if (p.type === 'health') {
+        if (health < MAX_HEALTH) { health++; updateHealthUI(); }
       } else if (p.type === 'invincible') {
         invincible = true;
-        invincibleTimer = 60 * 30; // 30 seconds
+        invincibleTimer = 60 * 15; // 15 seconds
       }
       return false;
     }
@@ -658,11 +752,21 @@ function render() {
       ctx.fillRect(p.x, py - 11, 22, 6);
       ctx.fillStyle = '#fff';
       ctx.font = 'bold 10px Courier New';
-      ctx.fillText('+3', p.x + 3, py + 5);
+      ctx.fillText('+2', p.x + 3, py + 5);
       // Glow
       ctx.strokeStyle = '#f5a62388';
       ctx.lineWidth = 2;
       ctx.strokeRect(p.x - 3, py - 14, 28, 28);
+    } else if (p.type === 'health') {
+      // Heart pickup
+      ctx.font = 'bold 22px Arial';
+      ctx.fillStyle = '#ff4466';
+      ctx.fillText('❤', p.x, py + 8);
+      ctx.strokeStyle = '#ff446688';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(p.x + 11, py, 16, 0, Math.PI * 2);
+      ctx.stroke();
     } else {
       // Invincibility star
       ctx.fillStyle = '#ffe066';
@@ -699,7 +803,8 @@ function render() {
 
   // Dino
   const dinoData = DINOS[selectedDino];
-  const isFlashing = invincible && Math.floor(flashTimer / 4) % 2 === 0;
+  const isFlashing = (invincible && Math.floor(flashTimer / 4) % 2 === 0)
+                  || (hitTimer > 0 && Math.floor(hitTimer / 6) % 2 === 0);
   if (!isFlashing) {
     dinoData.draw(ctx, dino.x, dino.y, animFrame, dino.ducking, invincible, dino.shooting);
   }
@@ -730,6 +835,20 @@ function drawCactus(ctx, o) {
 }
 
 function drawBird(ctx, o) {
+  if (o.flattened) {
+    const alpha = Math.min(o.flattenTimer / 10, 1);
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = '#e74c3c';
+    ctx.fillRect(o.x, o.y - 5, o.w + 8, 5);
+    ctx.fillStyle = '#c0392b';
+    ctx.fillRect(o.x + 4, o.y - 5, o.w, 2);
+    // Stars
+    ctx.fillStyle = '#ffe066';
+    ctx.fillText('*', o.x + 6,  o.y - 7);
+    ctx.fillText('*', o.x + 22, o.y - 9);
+    ctx.globalAlpha = 1;
+    return;
+  }
   ctx.fillStyle = '#e74c3c';
   // Body
   ctx.fillRect(o.x + 8, o.y - 10, 20, 14);
@@ -1008,8 +1127,9 @@ function deathLoop() {
   }
 }
 
-// Init ammo bar
+// Init UI
 updateAmmoUI();
+updateHealthUI();
 </script>
 </body>
 </html>
