@@ -17,6 +17,14 @@
   .ammo-bullet { width: 10px; height: 18px; background: #f5a623; border-radius: 2px; transition: background 0.2s; }
   .ammo-bullet.empty { background: #333; }
   #powerup-display { font-size: 0.9rem; color: #4ecca3; min-width: 140px; text-align: right; }
+  #stomp-display { font-size: 1rem; font-weight: bold; color: #ffe066; min-width: 110px; text-align: center; pointer-events: none; }
+  @keyframes stompPop {
+    0%   { transform: scale(0.4); opacity: 0; }
+    18%  { transform: scale(1.35); opacity: 1; }
+    55%  { transform: scale(1.0);  opacity: 1; }
+    100% { transform: scale(1.0);  opacity: 0; }
+  }
+  .stomp-anim { animation: stompPop 1.3s ease forwards; }
   #health-display { display: flex; align-items: center; gap: 5px; font-size: 0.9rem; }
   #health-display .hp-label { color: #aaa; margin-right: 2px; }
   .heart { font-size: 1.3rem; line-height: 1; color: #ff2244; transition: transform 0.15s; }
@@ -61,6 +69,7 @@
 <div id="ui">
   <div id="score-display">SCORE: <span id="score">0</span></div>
   <div id="health-display"><span>HP:</span></div>
+  <div id="stomp-display"></div>
   <div id="ammo-display"><span style="color:#f5a623">AMMO: </span><span id="ammo-bar" style="display:inline-flex;gap:3px;vertical-align:middle"></span></div>
   <div id="powerup-display" id="powerup-display"></div>
 </div>
@@ -193,7 +202,7 @@ const DINOS = [
   },
   {
     name: 'Blaze', color: '#9b59b6', eyeColor: '#ffe066', accentColor: '#7d3c98',
-    desc: 'One Revive', maxAmmo: 6, startAmmo: 3, maxHealth: 3, speedBonus: 0, hasRevive: true,
+    desc: 'One Revive', maxAmmo: 5, startAmmo: 3, maxHealth: 2, speedBonus: 0, hasRevive: true,
     draw(ctx, x, y, frame, ducking, invincible, shooting) {
       const c = invincible ? '#ffe066' : this.color;
       const a = invincible ? '#ffc200' : this.accentColor;
@@ -310,6 +319,40 @@ let obstacleCooldown = 80;
 let pickupCooldown = 700;
 let cloudCooldown = 60;
 let groundX = 0;
+
+// ── Scenery themes (one per 3000 pts) ─────────────────────────────────────────
+const SCENERY_THEMES = [
+  { // 0 – Deep Space (default)
+    skyTop:[10,10,26], skyBot:[22,33,62], starA:0.20,
+    cloudR:[30,58,95], cloudA:0.40,
+    groundFill:[15,52,96], groundLine:[78,204,163], groundDot:[26,74,122]
+  },
+  { // 1 – Crimson Dusk (3 000)
+    skyTop:[26,8,2], skyBot:[55,20,5], starA:0.18,
+    cloudR:[120,40,10], cloudA:0.38,
+    groundFill:[55,18,4], groundLine:[255,100,40], groundDot:[85,28,6]
+  },
+  { // 2 – Volcanic (6 000)
+    skyTop:[12,2,0], skyBot:[35,8,2], starA:0.15,
+    cloudR:[80,15,5], cloudA:0.35,
+    groundFill:[20,4,0], groundLine:[255,50,10], groundDot:[45,8,0]
+  },
+  { // 3 – Arctic Night (9 000)
+    skyTop:[0,10,22], skyBot:[0,22,50], starA:0.28,
+    cloudR:[160,200,240], cloudA:0.28,
+    groundFill:[0,22,44], groundLine:[160,255,230], groundDot:[0,44,80]
+  },
+  { // 4 – Neon Void (12 000+)
+    skyTop:[2,0,6], skyBot:[4,0,12], starA:0.22,
+    cloudR:[0,180,80], cloudA:0.20,
+    groundFill:[0,8,4], groundLine:[0,255,130], groundDot:[0,38,18]
+  }
+];
+let sceneryZone = 0;
+let prevZone = 0;
+let sceneryBlend = 1;
+let zoneLabel = '';
+let zoneLabelTimer = 0;
 
 // ── Setup dino selection UI ───────────────────────────────────────────────────
 const dinoOptions = document.getElementById('dino-options');
@@ -484,6 +527,15 @@ function updateHealthUI() {
   }
 }
 
+function showStompBonus() {
+  score += 150;
+  const el = document.getElementById('stomp-display');
+  el.textContent = 'STOMP! +150';
+  el.classList.remove('stomp-anim');
+  void el.offsetWidth; // restart animation
+  el.classList.add('stomp-anim');
+}
+
 function spawnObstacle() {
   const r = Math.random();
   if (r < 0.55) {
@@ -499,6 +551,24 @@ function spawnObstacle() {
   } else {
     // Rock
     obstacles.push({ type: 'rock', x: W + 20, y: GROUND, w: 30, h: 22 });
+  }
+  // Bonus trailing obstacles scaling with score
+  const bonusChance = score > 12000 ? 0.50 : score > 7500 ? 0.38 : score > 5000 ? 0.25 : 0;
+  if (bonusChance > 0 && Math.random() < bonusChance) {
+    const ex = W + 70 + Math.random() * 80;
+    if (Math.random() < 0.55) {
+      const hy = [GROUND - 60, GROUND - 100, GROUND - 30][Math.floor(Math.random() * 3)];
+      obstacles.push({ type: 'bird', x: ex, y: hy, w: 36, h: 22, wingUp: true, wingTimer: 0 });
+    } else {
+      const cnt = 1 + Math.floor(Math.random() * 2);
+      obstacles.push({ type: 'cactus', x: ex, y: GROUND, w: 18 + cnt * 6, h: 40 + Math.random() * 20, count: cnt });
+    }
+  }
+  // After 12000: occasional third obstacle
+  if (score > 12000 && Math.random() < 0.25) {
+    const ex2 = W + 140 + Math.random() * 80;
+    const hy = [GROUND - 60, GROUND - 100, GROUND - 30][Math.floor(Math.random() * 3)];
+    obstacles.push({ type: 'bird', x: ex2, y: hy, w: 36, h: 22, wingUp: true, wingTimer: 0 });
   }
 }
 
@@ -541,6 +611,22 @@ function update() {
   score++;
   speed = 5 + DINOS[selectedDino].speedBonus + score / 800;
 
+  // Scenery zone transition every 3000 pts
+  const newZone = Math.min(Math.floor(score / 2000), SCENERY_THEMES.length - 1);
+  if (newZone !== sceneryZone) {
+    prevZone = sceneryZone;
+    sceneryZone = newZone;
+    sceneryBlend = 0;
+    const zoneNames = ['DEEP SPACE', 'CRIMSON DUSK', 'VOLCANIC', 'ARCTIC NIGHT', 'NEON VOID'];
+    zoneLabel = zoneNames[sceneryZone] || `ZONE ${sceneryZone + 1}`;
+    zoneLabelTimer = 180;
+    if (Math.random() < 0.5) {
+      pickups.push({ type: 'invincible', x: W + 10, y: GROUND - 40 - Math.random() * 40, w: 26, h: 26, bob: 0 });
+    }
+  }
+  if (sceneryBlend < 1) sceneryBlend = Math.min(sceneryBlend + 1 / 90, 1);
+  if (zoneLabelTimer > 0) zoneLabelTimer--;
+
   // Dino physics
   if (dino.y < GROUND || dino.vy !== 0) {
     dino.vy += 0.8;
@@ -580,6 +666,9 @@ function update() {
     spawnObstacle();
     obstacleCooldown = 60 + Math.random() * 80 - speed * 2;
     if (obstacleCooldown < 35) obstacleCooldown = 35;
+    if (score > 5000)  obstacleCooldown = Math.max(22, obstacleCooldown - 12);
+    if (score > 7500)  obstacleCooldown = Math.max(16, obstacleCooldown - 8);
+    if (score > 12000) obstacleCooldown = Math.max(12, obstacleCooldown - 6);
   }
   pickupCooldown--;
   if (pickupCooldown <= 0) {
@@ -637,7 +726,7 @@ function update() {
     obstacles.forEach(o => {
       if (o.type === 'bird' && !o.flattened) {
         const oBox = { x: o.x + 3, y: o.y - o.h + 3, w: o.w - 6, h: o.h - 3 };
-        if (rectsOverlap(dinoBox, oBox)) { o.flattened = true; o.flattenTimer = 28; }
+        if (rectsOverlap(dinoBox, oBox)) { o.flattened = true; o.flattenTimer = 28; showStompBonus(); }
       }
     });
   }
@@ -656,19 +745,14 @@ function update() {
         o.flattenTimer = 28;
         dino.vy = -11;
         dino.jumpsLeft = Math.max(dino.jumpsLeft, 1);
+        showStompBonus();
       } else {
         health--;
         updateHealthUI();
         if (health <= 0) {
           if (reviveAvailable) {
             reviveAvailable = false;
-            health = 1;
-            updateHealthUI();
-            hitTimer = 180;
-            document.getElementById('powerup-display').textContent = 'REVIVED!';
-            setTimeout(() => {
-              if (state === 'running') document.getElementById('powerup-display').textContent = '';
-            }, 2000);
+            triggerRevive(); return;
           } else {
             gameOver(); return;
           }
@@ -702,18 +786,30 @@ function update() {
   document.getElementById('score').textContent = score;
 }
 
+// ── Scenery helpers ────────────────────────────────────────────────────────────
+function lerpC(a, b, t) {
+  return [Math.round(a[0]+(b[0]-a[0])*t), Math.round(a[1]+(b[1]-a[1])*t), Math.round(a[2]+(b[2]-a[2])*t)];
+}
+function scRgb(key) { const c = lerpC(SCENERY_THEMES[prevZone][key], SCENERY_THEMES[sceneryZone][key], sceneryBlend); return `rgb(${c[0]},${c[1]},${c[2]})`; }
+function scRgba(key, alphaKey) {
+  const c = lerpC(SCENERY_THEMES[prevZone][key], SCENERY_THEMES[sceneryZone][key], sceneryBlend);
+  const a = SCENERY_THEMES[prevZone][alphaKey] + (SCENERY_THEMES[sceneryZone][alphaKey] - SCENERY_THEMES[prevZone][alphaKey]) * sceneryBlend;
+  return `rgba(${c[0]},${c[1]},${c[2]},${a.toFixed(3)})`;
+}
+
 function render() {
   ctx.clearRect(0, 0, W, H);
 
   // Sky gradient
   const grad = ctx.createLinearGradient(0, 0, 0, H);
-  grad.addColorStop(0, '#0a0a1a');
-  grad.addColorStop(1, '#16213e');
+  grad.addColorStop(0, scRgb('skyTop'));
+  grad.addColorStop(1, scRgb('skyBot'));
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, W, H);
 
   // Stars
-  ctx.fillStyle = '#ffffff33';
+  const starAlpha = SCENERY_THEMES[prevZone].starA + (SCENERY_THEMES[sceneryZone].starA - SCENERY_THEMES[prevZone].starA) * sceneryBlend;
+  ctx.fillStyle = `rgba(255,255,255,${starAlpha.toFixed(3)})`;
   for (let i = 0; i < 40; i++) {
     const sx = (i * 173 + frame * 0.1) % W;
     const sy = (i * 97) % (H - 80);
@@ -721,7 +817,7 @@ function render() {
   }
 
   // Clouds
-  ctx.fillStyle = '#1e3a5f66';
+  ctx.fillStyle = scRgba('cloudR', 'cloudA');
   clouds.forEach(c => {
     ctx.beginPath();
     ctx.ellipse(c.x + c.w * 0.3, c.y, c.w * 0.3, 14, 0, 0, Math.PI * 2);
@@ -731,12 +827,12 @@ function render() {
   });
 
   // Ground
-  ctx.fillStyle = '#0f3460';
+  ctx.fillStyle = scRgb('groundFill');
   ctx.fillRect(0, GROUND, W, H - GROUND);
-  ctx.fillStyle = '#4ecca3';
+  ctx.fillStyle = scRgb('groundLine');
   ctx.fillRect(0, GROUND, W, 3);
   // Ground dots
-  ctx.fillStyle = '#1a4a7a';
+  ctx.fillStyle = scRgb('groundDot');
   for (let gx = groundX; gx < W; gx += 40) {
     ctx.fillRect(gx, GROUND + 8, 20, 3);
   }
@@ -814,6 +910,19 @@ function render() {
     ctx.fillStyle = '#ffffff33';
     ctx.font = '13px Courier New';
     ctx.fillText(`HI: ${hiScore}`, W - 90, 22);
+  }
+
+  // Zone label on scenery change
+  if (zoneLabelTimer > 0) {
+    const fadeIn  = Math.min((180 - zoneLabelTimer) / 25, 1);
+    const fadeOut = zoneLabelTimer < 55 ? zoneLabelTimer / 55 : 1;
+    ctx.globalAlpha = fadeIn * fadeOut;
+    ctx.font = 'bold 18px Courier New';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ffe066';
+    ctx.fillText(`— ${zoneLabel} —`, W / 2, 38);
+    ctx.globalAlpha = 1;
+    ctx.textAlign = 'left';
   }
 }
 
@@ -902,6 +1011,163 @@ function drawStar(ctx, cx, cy, outerR, innerR, points) {
   }
   ctx.closePath();
   ctx.fill();
+}
+
+// ── Blaze revive animation ────────────────────────────────────────────────────
+let reviveFrame = 0;
+let reviveParticles = [];
+const REVIVE_DURATION = 160; // ~2.7s at 60fps
+
+function triggerRevive() {
+  state = 'reviving';
+  reviveFrame = 0;
+  reviveParticles = [];
+  document.getElementById('powerup-display').textContent = '';
+  requestAnimationFrame(reviveLoop);
+}
+
+function reviveLoop() {
+  if (state !== 'reviving') return;
+  reviveFrame++;
+
+  // Spawn rising energy particles
+  if (reviveFrame < REVIVE_DURATION - 30) {
+    for (let i = 0; i < 4; i++) {
+      const colors = ['#9b59b6', '#d966ff', '#ffe066', '#c39bd3', '#ff99ff'];
+      reviveParticles.push({
+        x: dino.x + 14 + (Math.random() - 0.5) * 40,
+        y: dino.y - 10 - Math.random() * 20,
+        vx: (Math.random() - 0.5) * 2.5,
+        vy: -1.5 - Math.random() * 3.5,
+        r: 2 + Math.random() * 5,
+        life: 1,
+        decay: 0.012 + Math.random() * 0.018,
+        color: colors[Math.floor(Math.random() * colors.length)]
+      });
+    }
+  }
+
+  ctx.clearRect(0, 0, W, H);
+
+  // Sky
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#0a0a1a');
+  grad.addColorStop(1, '#16213e');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  // Stars (frozen)
+  ctx.fillStyle = '#ffffff33';
+  for (let i = 0; i < 40; i++) {
+    const sx = (i * 173 + frame * 0.1) % W;
+    const sy = (i * 97) % (H - 80);
+    ctx.fillRect(sx, sy, 1, 1);
+  }
+
+  // Clouds (frozen)
+  ctx.fillStyle = '#1e3a5f66';
+  clouds.forEach(c => {
+    ctx.beginPath();
+    ctx.ellipse(c.x + c.w * 0.3, c.y, c.w * 0.3, 14, 0, 0, Math.PI * 2);
+    ctx.ellipse(c.x + c.w * 0.6, c.y - 6, c.w * 0.25, 12, 0, 0, Math.PI * 2);
+    ctx.ellipse(c.x + c.w * 0.7, c.y + 4, c.w * 0.2, 10, 0, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  // Ground
+  ctx.fillStyle = '#0f3460';
+  ctx.fillRect(0, GROUND, W, H - GROUND);
+  ctx.fillStyle = '#4ecca3';
+  ctx.fillRect(0, GROUND, W, 3);
+  ctx.fillStyle = '#1a4a7a';
+  for (let gx = groundX; gx < W; gx += 40) ctx.fillRect(gx, GROUND + 8, 20, 3);
+
+  // Frozen obstacles
+  obstacles.forEach(o => {
+    if (o.type === 'cactus') drawCactus(ctx, o);
+    else if (o.type === 'bird') drawBird(ctx, o);
+    else if (o.type === 'rock') drawRock(ctx, o);
+  });
+
+  // Dark dramatic overlay
+  const overlayAlpha = Math.min(reviveFrame / 25, 0.55);
+  ctx.fillStyle = `rgba(0,0,0,${overlayAlpha})`;
+  ctx.fillRect(0, 0, W, H);
+
+  // Pulsing purple aura around Blaze
+  const pulse = Math.sin(reviveFrame * 0.18) * 0.5 + 0.5;
+  const auraR = 50 + pulse * 25;
+  const cx = dino.x + 14, cy = dino.y - 32;
+  const aura = ctx.createRadialGradient(cx, cy, 0, cx, cy, auraR);
+  aura.addColorStop(0, `rgba(155,89,182,${0.6 + pulse * 0.3})`);
+  aura.addColorStop(0.45, `rgba(217,102,255,${0.35 + pulse * 0.2})`);
+  aura.addColorStop(1, 'rgba(155,89,182,0)');
+  ctx.fillStyle = aura;
+  ctx.beginPath();
+  ctx.arc(cx, cy, auraR, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Outer ring flash
+  ctx.strokeStyle = `rgba(255,153,255,${0.4 + pulse * 0.4})`;
+  ctx.lineWidth = 2 + pulse * 3;
+  ctx.beginPath();
+  ctx.arc(cx, cy, auraR * 1.3, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Rising energy particles
+  reviveParticles.forEach(p => {
+    p.x += p.vx;
+    p.y += p.vy;
+    p.life -= p.decay;
+    if (p.life <= 0) return;
+    ctx.globalAlpha = p.life;
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  reviveParticles = reviveParticles.filter(p => p.life > 0);
+  ctx.globalAlpha = 1;
+
+  // Blaze: alternate gold/purple flashing on revive
+  const blazeFlash = Math.floor(reviveFrame / 5) % 2 === 0;
+  const dinoData = DINOS[selectedDino];
+  dinoData.draw(ctx, dino.x, dino.y, Math.floor(reviveFrame / 8) % 2, false, blazeFlash, false);
+
+  // "REVIVED!" text — scales in, then fades out
+  const textIn = Math.min(reviveFrame / 18, 1);
+  const textOut = reviveFrame > REVIVE_DURATION - 35 ? Math.max(0, (REVIVE_DURATION - reviveFrame) / 35) : 1;
+  const textAlpha = textIn * textOut;
+  const textScale = 0.4 + textIn * 0.6 + Math.sin(reviveFrame * 0.12) * 0.04;
+  ctx.save();
+  ctx.globalAlpha = textAlpha;
+  ctx.translate(W / 2, H / 2 - 15);
+  ctx.scale(textScale, textScale);
+  // Shadow
+  ctx.fillStyle = '#3d0066';
+  ctx.font = 'bold 38px Courier New';
+  ctx.textAlign = 'center';
+  ctx.fillText('REVIVED!', 3, 3);
+  // Main text
+  ctx.fillStyle = '#ffe066';
+  ctx.fillText('REVIVED!', 0, 0);
+  // Glow stroke
+  ctx.strokeStyle = '#d966ff';
+  ctx.lineWidth = 2;
+  ctx.strokeText('REVIVED!', 0, 0);
+  ctx.restore();
+  ctx.textAlign = 'left';
+
+  if (reviveFrame < REVIVE_DURATION) {
+    requestAnimationFrame(reviveLoop);
+  } else {
+    // Resume game with 1 HP and invincibility window
+    health = 1;
+    updateHealthUI();
+    hitTimer = 180;
+    state = 'running';
+    requestAnimationFrame(gameLoop);
+  }
 }
 
 // ── Meteor death animation ─────────────────────────────────────────────────────
